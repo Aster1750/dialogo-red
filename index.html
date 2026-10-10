@@ -146,6 +146,12 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
 .chip-t{min-width:0;height:34px;padding:2px 10px 0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chip-x{flex:none;width:32px;height:34px;font-size:18px;border-left:2px solid #c9d4e8}
 .hint{font-size:12px;color:var(--help-hi);white-space:nowrap}
+.fxb{
+  flex:none;height:34px;padding:2px 12px 0;
+  background:var(--paper);color:var(--ink);border:2px solid var(--help-edge);
+  font-size:12px;letter-spacing:.08em;
+}
+.fxb.on{background:var(--gold)}
 
 /* phone held sideways: controls move to a side column */
 @media (orientation:landscape) and (max-height:540px){
@@ -171,7 +177,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
       <button type="button" class="opt" role="radio" aria-checked="true"><i class="cur"></i><span class="tx">YES</span></button>
       <button type="button" class="opt" role="radio" aria-checked="false"><i class="cur"></i><span class="tx">NO</span></button>
     </div>
-    <div class="frame dialog" id="dialog" role="button" tabindex="0" aria-label="Fala do Red. Toque para repetir.">
+    <div class="frame dialog" id="dialog" role="button" tabindex="0" aria-label="Fala do Red. Toque para esconder ou mostrar.">
       <canvas class="bg" aria-hidden="true"></canvas>
       <p class="txt" id="txt"></p>
       <i class="more" id="more" hidden></i>
@@ -184,7 +190,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     <button type="button" class="help-toggle" id="toggle" aria-expanded="true" aria-controls="helpBody">
       <span class="lbl">AJUSTES</span><span class="chev" aria-hidden="true"></span>
     </button>
-    <button type="button" class="snd" id="snd" aria-pressed="true">SOM ON</button>
+    <button type="button" class="snd" id="snd" aria-pressed="true">SOM 1</button>
     <button type="button" class="fs" id="fs" hidden>TELA CHEIA</button>
   </div>
   <div class="help-body" id="helpBody">
@@ -203,6 +209,10 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     <div class="row">
       <span class="tag">FALAS</span>
       <div class="strip" id="chips" role="group" aria-label="Falas guardadas"></div>
+    </div>
+    <div class="row">
+      <span class="tag">SONS</span>
+      <div class="strip" id="fxs" role="group" aria-label="Efeitos sonoros"></div>
     </div>
   </div>
 </section>
@@ -246,7 +256,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     style: store.get('style', 0),
     sel: store.get('sel', 0) === 1 ? 1 : 0,
     bg: store.get('bg', 0),
-    sound: store.get('sound', true) !== false,
+    sfx: store.get('sfx', store.get('sound', true) === false ? 0 : 1),
     phrases: store.get('phrases', DEFAULT_PHRASES.slice()),
     open: store.get('open', true) !== false
   };
@@ -377,8 +387,9 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
 
   /* ----- dialog text with typewriter ----- */
   const txt = $('txt'), more = $('more');
-  let chars = [], timer = 0;
+  let chars = [], timer = 0, blank = false;
   function setText(t, animate){
+    blank = false;
     clearTimeout(timer);
     txt.textContent = '';
     chars = [];
@@ -403,48 +414,161 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
       else more.hidden = false;
     })();
   }
-  dialog.addEventListener('click', () => setText(state.text, true));
+  /* tap the box: first tap empties it, next tap types the last chosen line again */
+  function toggleText(){
+    if (blank){ setText(state.text, true); return; }
+    clearTimeout(timer);
+    txt.textContent = ''; chars = [];
+    more.hidden = true;
+    blank = true;
+  }
+  dialog.addEventListener('click', toggleText);
   dialog.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setText(state.text, true); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleText(); }
   });
 
-  /* ----- sound: two GBA-style pulse-wave blips (move, confirm) ----- */
-  let actx = null, pulse = null;
+  /* ----- sound: GBA-style pulse-wave blips (move, confirm); four flavours, picked with the SOM button ----- */
+  /* f = Hz, t = start (s), d = length (s), v = volume, w = pulse width; step = chip-style stepped decay */
+  const SFX = [
+    { move:[{f:1046.5,d:.055,v:.09,w:.25}],
+      ok:[{f:1046.5,d:.06,v:.1,w:.25},{f:1568,t:.065,d:.17,v:.1,w:.25}] },
+    { step:1, move:[{f:1760,d:.04,v:.08,w:.125}],
+      ok:[{f:1760,d:.045,v:.08,w:.125},{f:2349.3,t:.05,d:.13,v:.08,w:.125}] },
+    { step:1, move:[{f:1318.5,d:.07,v:.06,w:.5}],
+      ok:[{f:1318.5,d:.05,v:.06,w:.5},{f:1975.5,t:.055,d:.14,v:.06,w:.5}] },
+    { step:1, move:[{f:784,d:.05,v:.08,w:.25}],
+      ok:[{f:784,d:.05,v:.08,w:.25},{f:1174.7,t:.055,d:.13,v:.08,w:.25}] }
+  ];
+  let actx = null;
+  const waves = {};
+  function wave(w){
+    if (!waves[w]){
+      const n = 24, re = new Float32Array(n + 1), im = new Float32Array(n + 1);
+      for (let k = 1; k <= n; k++){
+        re[k] = Math.sin(2 * Math.PI * k * w) / (k * Math.PI);
+        im[k] = (1 - Math.cos(2 * Math.PI * k * w)) / (k * Math.PI);
+      }
+      waves[w] = actx.createPeriodicWave(re, im);
+    }
+    return waves[w];
+  }
   function audio(){
     if (!actx){
       try {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return null;
         actx = new AC();
-        const n = 24, d = 0.25, re = new Float32Array(n + 1), im = new Float32Array(n + 1);
-        for (let k = 1; k <= n; k++){
-          re[k] = Math.sin(2 * Math.PI * k * d) / (k * Math.PI);
-          im[k] = (1 - Math.cos(2 * Math.PI * k * d)) / (k * Math.PI);
-        }
-        pulse = actx.createPeriodicWave(re, im);
       } catch(e){ actx = null; return null; }
     }
     if (actx.state === 'suspended') actx.resume();
     return actx;
   }
-  function tone(freq, start, dur, vol){
-    const t0 = actx.currentTime + start;
+  function note(n, stepped, out){
+    const t0 = actx.currentTime + (n.t || 0);
     const o = actx.createOscillator(), g = actx.createGain();
-    if (pulse) o.setPeriodicWave(pulse); else o.type = 'square';
-    o.frequency.setValueAtTime(freq, t0);
+    try { o.setPeriodicWave(wave(n.w)); } catch(e){ o.type = 'square'; }
+    o.frequency.setValueAtTime(n.f, t0);
+    if (n.f2) o.frequency.exponentialRampToValueAtTime(n.f2, t0 + n.d);
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.linearRampToValueAtTime(vol, t0 + 0.004);
-    g.gain.setValueAtTime(vol, t0 + dur * 0.55);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g); g.connect(actx.destination);
-    o.start(t0); o.stop(t0 + dur + 0.02);
+    g.gain.linearRampToValueAtTime(n.v, t0 + 0.003);
+    if (stepped){
+      const k = Math.max(3, Math.round(n.d / 0.01));
+      for (let i = 1; i < k; i++) g.gain.setValueAtTime(n.v * (1 - i / k), t0 + 0.003 + i * (n.d - 0.003) / k);
+      g.gain.setValueAtTime(0.0001, t0 + n.d);
+    } else {
+      g.gain.setValueAtTime(n.v, t0 + n.d * 0.55);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);
+    }
+    o.connect(g); g.connect(out || actx.destination);
+    o.start(t0); o.stop(t0 + n.d + 0.02);
   }
   function play(kind){
-    if (!state.sound || !audio()) return;
-    if (kind === 'move') tone(1046.5, 0, 0.055, 0.09);
-    else { tone(1046.5, 0, 0.06, 0.1); tone(1568, 0.065, 0.17, 0.1); }
+    if (!state.sfx || !audio()) return;
+    const s = SFX[state.sfx - 1];
+    s[kind].forEach(n => note(n, s.step));
   }
-  document.addEventListener('pointerdown', () => { if (state.sound) audio(); }, { passive: true });
+  document.addEventListener('pointerdown', () => { if (state.sfx) audio(); }, { passive: true });
+
+  /* ----- fun effects (SONS row): chiptune takes on evolution, ball capture, victory and defeat ----- */
+  const HZ = s => 523.25 * Math.pow(2, s / 12);          /* semitones above C5 */
+  function noise(n, out){
+    const t0 = actx.currentTime + (n.t || 0);
+    const len = Math.ceil(actx.sampleRate * n.d);
+    const buf = actx.createBuffer(1, len, actx.sampleRate), data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(n.f, t0);
+    bp.frequency.exponentialRampToValueAtTime(n.f2, t0 + n.d);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(n.v, t0 + n.d * 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);
+    src.connect(bp); bp.connect(g); g.connect(out || actx.destination);
+    src.start(t0);
+  }
+  const FX = [
+    { n:'EVOLUÇÃO', make(){
+      const out = [], sc = [0, 2, 4, 7, 9];
+      let t = 0;
+      for (let i = 0; i < 15; i++){                      /* climbing sparkle that speeds up */
+        const gap = 0.2 - i * 0.01;
+        out.push({ f: HZ(sc[i % 5] + 12 * Math.floor(i / 5)), t, d: gap * 1.5, v: .06, w: .25 });
+        t += gap;
+      }
+      t += 0.06;
+      [12, 16, 19, 24].forEach(s => out.push({ f: HZ(s), t, d: .9, v: .05, w: .125, s: 1 }));
+      for (let i = 0; i < 6; i++) out.push({ f: HZ(i % 2 ? 26 : 24), t: t + .1 + i * .07, d: .06, v: .04, w: .5 });
+      return out;
+    } },
+    { n:'POKÉBOLA', make(){
+      return [
+        { noise: 1, f: 500, f2: 3000, t: 0, d: .4, v: .22 },
+        { f: 1400, f2: 300, t: .45, d: .12, v: .08, w: .5 },
+        { f: 330, f2: 220, t: .95, d: .07, v: .1, w: .5 },
+        { f: 330, f2: 220, t: 1.5, d: .07, v: .1, w: .5 },
+        { f: 330, f2: 220, t: 2.05, d: .07, v: .1, w: .5 },
+        { f: HZ(7), t: 2.6, d: .08, v: .08, w: .25 },
+        { f: HZ(12), t: 2.69, d: .08, v: .08, w: .25 },
+        { f: HZ(19), t: 2.78, d: .4, v: .08, w: .25, s: 1 }
+      ];
+    } },
+    { n:'VITÓRIA', make(){
+      const lead = [[7, 0, .09], [7, .11, .09], [7, .22, .09], [12, .33, .32], [9, .7, .12], [12, .84, .12], [16, 1, .7]];
+      const out = [];
+      lead.forEach(([s, t, d]) => out.push({ f: HZ(s), t, d, v: .07, w: .25 }));
+      lead.forEach(([s, t, d]) => out.push({ f: HZ(s) / 2, t, d, v: .05, w: .5 }));
+      [19, 24].forEach(s => out.push({ f: HZ(s), t: 1, d: .7, v: .04, w: .125, s: 1 }));
+      return out;
+    } },
+    { n:'DERROTA', make(){
+      return [
+        { f: HZ(-1), t: 0, d: .2, v: .07, w: .5 },
+        { f: HZ(-2), t: .24, d: .2, v: .07, w: .5 },
+        { f: HZ(-3), t: .48, d: .2, v: .07, w: .5 },
+        { f: HZ(-5), f2: HZ(-12), t: .75, d: .9, v: .07, w: .5 }
+      ];
+    } }
+  ];
+  const fxs = $('fxs');
+  let fxBus = null, fxTimer = 0;
+  function playFx(i, btn){
+    if (!audio()) return;
+    if (fxBus){ try { fxBus.disconnect(); } catch(e){} }
+    fxBus = actx.createGain(); fxBus.connect(actx.destination);
+    const notes = FX[i].make();
+    notes.forEach(n => n.noise ? noise(n, fxBus) : note(n, n.s, fxBus));
+    fxs.querySelectorAll('.fxb.on').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    clearTimeout(fxTimer);
+    fxTimer = setTimeout(() => btn.classList.remove('on'), Math.max(...notes.map(n => (n.t || 0) + n.d)) * 1000);
+  }
+  FX.forEach((f, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'fxb'; b.textContent = f.n;
+    b.addEventListener('click', () => playFx(i, b));
+    fxs.appendChild(b);
+  });
 
   /* ----- YES / NO: tap or slide to move the arrow, tap the marked one again to confirm ----- */
   const menu = $('menu');
@@ -504,13 +628,13 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   /* ----- sound switch ----- */
   const snd = $('snd');
   function syncSnd(){
-    snd.setAttribute('aria-pressed', String(state.sound));
-    snd.textContent = state.sound ? 'SOM ON' : 'SOM OFF';
+    snd.setAttribute('aria-pressed', String(state.sfx > 0));
+    snd.textContent = state.sfx ? 'SOM ' + state.sfx : 'SOM OFF';
   }
   snd.addEventListener('click', () => {
-    state.sound = !state.sound; store.set('sound', state.sound);
+    state.sfx = (state.sfx + 1) % (SFX.length + 1); store.set('sfx', state.sfx);
     syncSnd();
-    if (state.sound) play('move');
+    if (state.sfx){ play('move'); setTimeout(() => play('ok'), 260); }
   });
   syncSnd();
 
