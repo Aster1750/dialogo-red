@@ -56,6 +56,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
 
 /* YES / NO */
 .menu{
+  touch-action:none;
   align-self:flex-end;
   width:calc(var(--u)*46);
   padding:calc(var(--u)*(var(--bw) + 1)) calc(var(--u)*(var(--bw) + 1));
@@ -72,6 +73,9 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   visibility:hidden;
 }
 .opt[aria-checked="true"] .cur{visibility:visible}
+.opt.go .cur,.opt.go .tx{animation:flash .6s steps(1) 1}
+@keyframes flash{0%,40%,80%{opacity:0}20%,60%,100%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.opt.go .cur,.opt.go .tx{animation:none}}
 
 /* dialog */
 .dialog{
@@ -106,14 +110,15 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   font-size:12px;letter-spacing:.14em;
   text-shadow:1px 1px 0 var(--help-edge);
 }
-.fs{
+.fs,.snd{
   flex:none;height:28px;padding:2px 10px 0;
   background:var(--gold);color:var(--ink);border:2px solid var(--help-edge);
   font-size:11px;letter-spacing:.1em;
 }
+.snd[aria-pressed="false"]{background:var(--help-edge);color:var(--help-hi)}
 .chev::before{content:"▼"}
 .help[data-open="false"] .chev::before{content:"▲"}
-.help-body{display:grid;gap:10px;padding:2px 16px 14px}
+.help-body{display:grid;gap:8px;padding:2px 16px 14px;max-height:52vh;overflow-y:auto}
 .row{display:flex;align-items:center;gap:10px;min-width:0}
 .tag{flex:none;width:50px;font-size:11px;letter-spacing:.1em;color:var(--help-hi)}
 .strip{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:4px;overflow-x:auto;scrollbar-width:none}
@@ -149,8 +154,9 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   .chev::before{content:"▶"}
   .help[data-open="false"] .chev::before{content:"◀"}
   .help[data-open="false"]{width:0;border:0;box-shadow:none;overflow:visible;background:none}
-  .help[data-open="false"] .lbl,.help[data-open="false"] .fs{display:none}
+  .help[data-open="false"] .lbl,.help[data-open="false"] .fs,.help[data-open="false"] .snd{display:none}
   .help-head{padding-right:12px}
+  .help-body{max-height:none;overflow:visible}
   .help[data-open="false"] .help-toggle{
     position:fixed;z-index:5;top:calc(env(safe-area-inset-top,0px) + 8px);right:8px;
     width:40px;padding:0;justify-content:center;background:var(--help);border:2px solid var(--help-edge);
@@ -162,8 +168,8 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   <div class="board" id="board">
     <div class="frame menu" id="menu" role="radiogroup" aria-label="Resposta">
       <canvas class="bg" aria-hidden="true"></canvas>
-      <button type="button" class="opt" role="radio" aria-checked="true"><i class="cur"></i>YES</button>
-      <button type="button" class="opt" role="radio" aria-checked="false"><i class="cur"></i>NO</button>
+      <button type="button" class="opt" role="radio" aria-checked="true"><i class="cur"></i><span class="tx">YES</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false"><i class="cur"></i><span class="tx">NO</span></button>
     </div>
     <div class="frame dialog" id="dialog" role="button" tabindex="0" aria-label="Fala do Red. Toque para repetir.">
       <canvas class="bg" aria-hidden="true"></canvas>
@@ -178,6 +184,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     <button type="button" class="help-toggle" id="toggle" aria-expanded="true" aria-controls="helpBody">
       <span class="lbl">AJUSTES</span><span class="chev" aria-hidden="true"></span>
     </button>
+    <button type="button" class="snd" id="snd" aria-pressed="true">SOM ON</button>
     <button type="button" class="fs" id="fs" hidden>TELA CHEIA</button>
   </div>
   <div class="help-body" id="helpBody">
@@ -188,6 +195,10 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     <div class="row">
       <span class="tag">BORDA</span>
       <div class="strip" id="swatches" role="group" aria-label="Estilo da borda"></div>
+    </div>
+    <div class="row">
+      <span class="tag">FUNDO</span>
+      <div class="strip" id="bgs" role="group" aria-label="Fundo da tela"></div>
     </div>
     <div class="row">
       <span class="tag">FALAS</span>
@@ -234,6 +245,8 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     text: String(store.get('text', DEFAULT_PHRASES[0])),
     style: store.get('style', 0),
     sel: store.get('sel', 0) === 1 ? 1 : 0,
+    bg: store.get('bg', 0),
+    sound: store.get('sound', true) !== false,
     phrases: store.get('phrases', DEFAULT_PHRASES.slice()),
     open: store.get('open', true) !== false
   };
@@ -254,13 +267,61 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     g.fillStyle = '#d83a2a';
     [7,5,3,1].forEach((n, y) => g.fillRect((7 - n) / 2, y, n, 1));
   }));
-  root.style.setProperty('--tile', glyphURL(16, 16, g => {
-    g.fillStyle = '#90d194'; g.fillRect(0, 0, 16, 16);
-    g.fillStyle = '#a8e4a8';
-    [[2,3],[10,1],[6,10],[13,12],[1,13],[9,6]].forEach(([x, y]) => g.fillRect(x, y, 2, 1));
-    g.fillStyle = '#78bd80';
-    [[3,4],[11,2],[7,11],[14,13],[2,14],[10,7]].forEach(([x, y]) => g.fillRect(x, y, 1, 1));
-  }));
+  /* ----- backgrounds: one 16x16 tile each; the first (grass) is the default ----- */
+  function px(g, c, pts, w = 1, h = 1){ g.fillStyle = c; pts.forEach(([x, y]) => g.fillRect(x, y, w, h)); }
+  const BGS = [
+    { n:'Grama', base:'#90d194', draw(g){
+      px(g, '#a8e4a8', [[2,3],[10,1],[6,10],[13,12],[1,13],[9,6]], 2, 1);
+      px(g, '#78bd80', [[3,4],[11,2],[7,11],[14,13],[2,14],[10,7]]);
+    } },
+    { n:'Água', base:'#5aa8ee', draw(g){
+      px(g, '#9ad0fa', [[2,3],[9,3],[6,11],[13,11]], 3, 1);
+      px(g, '#4a90d8', [[5,7],[12,7],[1,15],[8,15]], 3, 1);
+    } },
+    { n:'Areia', base:'#e8d29a', draw(g){
+      px(g, '#d4b878', [[2,3],[10,2],[5,9],[13,11],[1,13],[8,14]]);
+      px(g, '#f4e4b4', [[6,4],[12,6],[3,11],[10,12]], 2, 1);
+    } },
+    { n:'Neve', base:'#eef6fc', draw(g){
+      px(g, '#cfe2f2', [[2,3],[10,1],[6,10],[13,12],[1,13],[9,6]], 2, 1);
+      px(g, '#ffffff', [[5,5],[12,9],[3,13],[9,14]]);
+    } },
+    { n:'Noite', base:'#2a4466', draw(g){
+      px(g, '#3a5a82', [[2,3],[10,1],[6,10],[13,12],[1,13],[9,6]], 2, 1);
+      px(g, '#1e3250', [[3,4],[11,2],[7,11],[14,13],[2,14],[10,7]]);
+      px(g, '#f8f0b0', [[14,3]]);
+    } },
+    { n:'Caverna', base:'#6e665e', draw(g){
+      px(g, '#58514a', [[1,2],[8,1],[4,8],[12,6],[2,13],[10,12]], 3, 2);
+      px(g, '#8a8279', [[5,3],[12,3],[8,9],[1,9],[13,14]], 2, 1);
+    } },
+    { n:'Madeira', base:'#c99a5a', draw(g){
+      px(g, '#a67a40', [[0,7],[0,15]], 16, 1);
+      px(g, '#a67a40', [[5,0],[11,8]], 1, 7);
+      px(g, '#dcb27a', [[0,0],[0,8]], 16, 1);
+    } },
+    { n:'Centro Pokémon', base:'#f6c8d4', draw(g){
+      px(g, '#eeaabf', [[0,0],[8,8]], 8, 8);
+      px(g, '#e090aa', [[0,7],[0,15]], 16, 1);
+      px(g, '#e090aa', [[7,0],[15,0]], 1, 16);
+    } },
+    { n:'Lava', base:'#c4351f', draw(g){
+      px(g, '#f08a22', [[2,3],[9,9],[12,2]], 3, 2);
+      px(g, '#8c1c10', [[7,2],[3,10],[13,12]], 2, 2);
+    } },
+    { n:'Preto', base:'#0b0b12', draw(g){ px(g, '#16161f', [[3,3],[11,11]]); } }
+  ];
+  const tiles = [];
+  function tile(i){
+    if (!tiles[i]){
+      const c = document.createElement('canvas'); c.width = c.height = 16;
+      const g = c.getContext('2d');
+      g.fillStyle = BGS[i].base; g.fillRect(0, 0, 16, 16);
+      BGS[i].draw(g);
+      tiles[i] = c;
+    }
+    return tiles[i];
+  }
 
   const CORNER = [[], [1], [2, 1]];
   function cut(g, x, y, w, h, r){
@@ -347,14 +408,133 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setText(state.text, true); }
   });
 
-  /* ----- YES / NO ----- */
-  const opts = Array.from(document.querySelectorAll('.opt'));
-  function select(i){
-    state.sel = i; store.set('sel', i);
-    opts.forEach((o, k) => o.setAttribute('aria-checked', k === i ? 'true' : 'false'));
+  /* ----- sound: two GBA-style pulse-wave blips (move, confirm) ----- */
+  let actx = null, pulse = null;
+  function audio(){
+    if (!actx){
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        actx = new AC();
+        const n = 24, d = 0.25, re = new Float32Array(n + 1), im = new Float32Array(n + 1);
+        for (let k = 1; k <= n; k++){
+          re[k] = Math.sin(2 * Math.PI * k * d) / (k * Math.PI);
+          im[k] = (1 - Math.cos(2 * Math.PI * k * d)) / (k * Math.PI);
+        }
+        pulse = actx.createPeriodicWave(re, im);
+      } catch(e){ actx = null; return null; }
+    }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
   }
-  opts.forEach((o, i) => o.addEventListener('click', () => select(i)));
-  select(state.sel);
+  function tone(freq, start, dur, vol){
+    const t0 = actx.currentTime + start;
+    const o = actx.createOscillator(), g = actx.createGain();
+    if (pulse) o.setPeriodicWave(pulse); else o.type = 'square';
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.004);
+    g.gain.setValueAtTime(vol, t0 + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  function play(kind){
+    if (!state.sound || !audio()) return;
+    if (kind === 'move') tone(1046.5, 0, 0.055, 0.09);
+    else { tone(1046.5, 0, 0.06, 0.1); tone(1568, 0.065, 0.17, 0.1); }
+  }
+  document.addEventListener('pointerdown', () => { if (state.sound) audio(); }, { passive: true });
+
+  /* ----- YES / NO: tap or slide to move the arrow, tap the marked one again to confirm ----- */
+  const menu = $('menu');
+  const opts = Array.from(menu.querySelectorAll('.opt'));
+  function paintSel(){
+    opts.forEach((o, k) => o.setAttribute('aria-checked', k === state.sel ? 'true' : 'false'));
+  }
+  function select(i){
+    if (state.sel === i) return false;
+    state.sel = i; store.set('sel', i);
+    paintSel(); play('move');
+    return true;
+  }
+  function confirmSel(){
+    const o = opts[state.sel];
+    o.classList.remove('go'); void o.offsetWidth; o.classList.add('go');
+    play('ok');
+  }
+  function optionAt(y){
+    const a = opts[0].getBoundingClientRect(), b = opts[1].getBoundingClientRect();
+    return y < (a.bottom + b.top) / 2 ? 0 : 1;
+  }
+  let drag = null;
+  menu.addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    drag = { id: e.pointerId, y0: e.clientY, was: state.sel, on: optionAt(e.clientY), changed: false, moved: false };
+    try { menu.setPointerCapture(e.pointerId); } catch(_){}
+    if (select(drag.on)) drag.changed = true;
+    e.preventDefault();
+  });
+  menu.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (Math.abs(e.clientY - drag.y0) > 10) drag.moved = true;
+    if (select(optionAt(e.clientY))) drag.changed = true;
+  });
+  menu.addEventListener('pointerup', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const tap = !drag.changed && !drag.moved && drag.on === drag.was;
+    drag = null;
+    if (tap) confirmSel();
+  });
+  menu.addEventListener('pointercancel', () => { drag = null; });
+  menu.addEventListener('click', e => {           /* keyboard only; touch is handled above */
+    if (e.detail !== 0) return;
+    const i = opts.indexOf(e.target.closest('.opt'));
+    if (i < 0) return;
+    if (i === state.sel) confirmSel(); else select(i);
+  });
+  menu.addEventListener('keydown', e => {
+    const to = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? 0 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1;
+    if (to < 0) return;
+    e.preventDefault(); select(to); opts[to].focus();
+  });
+  opts.forEach(o => o.addEventListener('animationend', () => o.classList.remove('go')));
+  paintSel();
+
+  /* ----- sound switch ----- */
+  const snd = $('snd');
+  function syncSnd(){
+    snd.setAttribute('aria-pressed', String(state.sound));
+    snd.textContent = state.sound ? 'SOM ON' : 'SOM OFF';
+  }
+  snd.addEventListener('click', () => {
+    state.sound = !state.sound; store.set('sound', state.sound);
+    syncSnd();
+    if (state.sound) play('move');
+  });
+  syncSnd();
+
+  /* ----- backgrounds ----- */
+  const bgs = $('bgs');
+  BGS.forEach((b, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'sw';
+    btn.setAttribute('aria-label', 'Fundo ' + (i + 1) + ': ' + b.n);
+    const cv = document.createElement('canvas'); cv.width = 18; cv.height = 13;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#303038'; cut(g, 0, 0, 18, 13, 2);
+    g.fillStyle = g.createPattern(tile(i), 'repeat'); cut(g, 1, 1, 16, 11, 1);
+    btn.appendChild(cv);
+    btn.addEventListener('click', () => applyBg(i));
+    bgs.appendChild(btn);
+  });
+  function applyBg(i){
+    if (!(i >= 0 && i < BGS.length)) i = 0;
+    state.bg = i; store.set('bg', i);
+    root.style.setProperty('--tile', 'url(' + tile(i).toDataURL() + ')');
+    root.style.setProperty('--grass', BGS[i].base);
+    Array.from(bgs.children).forEach((b, k) => b.setAttribute('aria-pressed', k === i ? 'true' : 'false'));
+  }
 
   /* ----- border styles ----- */
   const swatches = $('swatches');
@@ -457,6 +637,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   /* ----- start ----- */
   renderChips();
   setOpen(state.open);
+  applyBg(state.bg);
   applyStyle(state.style);
   fit();
   setText(state.text, true);
@@ -470,4 +651,4 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(repaint);
 })();
 </script>
-<script>if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}</script></body></html>
+<script>if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0){var had=!!navigator.serviceWorker.controller;navigator.serviceWorker.addEventListener("controllerchange",function(){if(had)location.reload()});window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}</script></body></html>
