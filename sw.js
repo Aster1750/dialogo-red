@@ -1,5 +1,5 @@
 /* Offline cache: every file of the app is stored on the phone at the first visit. */
-const V = 'dialogo-red-v4';
+const V = 'dialogo-red-v5';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {

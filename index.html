@@ -152,6 +152,11 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
   font-size:12px;letter-spacing:.08em;
 }
 .fxb.on{background:var(--gold)}
+.chk{position:relative;flex:none;display:flex;align-items:center;gap:8px;height:34px;padding-right:6px;font-size:12px;letter-spacing:.08em;cursor:pointer}
+.chk input{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0}
+.chk .box{box-sizing:border-box;width:24px;height:24px;display:grid;place-items:center;background:var(--paper);border:3px solid var(--help-edge)}
+.chk input:checked + .box::after{content:"";width:6px;height:12px;margin-top:-3px;border:solid var(--ink);border-width:0 3px 3px 0;transform:rotate(45deg)}
+.chk input:focus-visible + .box{outline:3px solid var(--gold);outline-offset:2px}
 
 /* phone held sideways: controls move to a side column */
 @media (orientation:landscape) and (max-height:540px){
@@ -212,7 +217,9 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     </div>
     <div class="row">
       <span class="tag">SONS</span>
-      <div class="strip" id="fxs" role="group" aria-label="Efeitos sonoros"></div>
+      <div class="strip" id="fxs" role="group" aria-label="Efeitos sonoros">
+        <label class="chk"><input type="checkbox" id="txtSnd" checked><span class="box" aria-hidden="true"></span><span>SOM DO TEXTO</span></label>
+      </div>
     </div>
   </div>
 </section>
@@ -257,6 +264,7 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     sel: store.get('sel', 0) === 1 ? 1 : 0,
     bg: store.get('bg', 0),
     sfx: store.get('sfx', store.get('sound', true) === false ? 0 : 1),
+    txtSnd: store.get('txtsnd', true) !== false,
     phrases: store.get('phrases', DEFAULT_PHRASES.slice()),
     open: store.get('open', true) !== false
   };
@@ -410,17 +418,24 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     }
     let i = 0;
     (function tick(){
-      if (i < chars.length){ chars[i++].classList.add('on'); timer = setTimeout(tick, 34); }
+      if (i < chars.length){ chars[i++].classList.add('on'); textBlip(); timer = setTimeout(tick, 34); }
       else more.hidden = false;
     })();
   }
-  /* tap the box: first tap empties it, next tap types the last chosen line again */
+  /* tap the box: first tap wipes the line away letter by letter, next tap types the last chosen line again */
   function toggleText(){
     if (blank){ setText(state.text, true); return; }
     clearTimeout(timer);
-    txt.textContent = ''; chars = [];
-    more.hidden = true;
     blank = true;
+    more.hidden = true;
+    const shown = chars.filter(s => s.classList.contains('on'));
+    if (reduce || !shown.length){ txt.textContent = ''; chars = []; return; }
+    const step = Math.max(6, Math.min(22, 300 / shown.length));
+    (function erase(){
+      const s = shown.pop();
+      if (s){ s.classList.remove('on'); timer = setTimeout(erase, step); }
+      else { txt.textContent = ''; chars = []; }
+    })();
   }
   dialog.addEventListener('click', toggleText);
   dialog.addEventListener('keydown', e => {
@@ -569,6 +584,18 @@ button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:none;cu
     b.addEventListener('click', () => playFx(i, b));
     fxs.appendChild(b);
   });
+
+  /* ----- text sound: soft blip, every second letter, only once the audio has been unlocked by a tap ----- */
+  let blipN = 0;
+  function textBlip(){
+    if (!state.txtSnd || !state.sfx || !actx || actx.state !== 'running') return;
+    const k = blipN++;
+    if (k % 2) return;
+    note({ f: (k >> 1) % 2 ? 740 : 880, d: .022, v: .035, w: .5 }, false);
+  }
+  const txtSnd = $('txtSnd');
+  txtSnd.checked = state.txtSnd;
+  txtSnd.addEventListener('change', () => { state.txtSnd = txtSnd.checked; store.set('txtsnd', state.txtSnd); });
 
   /* ----- YES / NO: tap or slide to move the arrow, tap the marked one again to confirm ----- */
   const menu = $('menu');
